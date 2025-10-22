@@ -9,9 +9,16 @@ load_dotenv()
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-def run_command(cmd: str):
+def run_command(cmd: str): # run linux command
     result = os.system(cmd)
     return result
+
+def create_folder(folder_name: str):
+    try:
+        os.makedirs(folder_name, exist_ok=True)
+        return f"Folder '{folder_name}' created successfully."
+    except Exception as e:
+        return str(e)
 
 def get_weather(city: str):
     url = f"https://wttr.in/{city}?format=%C+%t"
@@ -24,7 +31,8 @@ def get_weather(city: str):
 
 available_tools = {
     "get_weather": get_weather,
-    "run_command": run_command
+    "run_command": run_command,
+    "create_folder": create_folder
 }
 
 SYSTEM_PROMPT = f"""
@@ -52,6 +60,7 @@ SYSTEM_PROMPT = f"""
     Available Tools:
     - "get_weather": Takes a city name as an input and returns the current weather for the city
     - "run_command": Takes linux command as a string and executes the command and returns the output after executing it.
+    - "create_folder": Takes folder name as input and creates a folder with the given name.
 
     Example:
     User Query: What is the weather of new york?
