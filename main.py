@@ -20,6 +20,47 @@ def create_folder(folder_name: str):
     except Exception as e:
         return str(e)
 
+def write_file(input_json): # write file
+    data = input_json   
+    path = data["path"]
+    content = data["content"]
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(content)
+    return f"Wrote file at {path}"
+
+def read_file(path: str): # read file
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return f.read()
+    except FileNotFoundError:
+        return f"ERROR: File '{path}' not found."
+    except Exception as e:
+        return f"ERROR: {str(e)}"
+    
+def deploy_app(input_json): # deploy app
+    """
+    Expected input_json = {
+        "platform": "vercel",
+        "project_dir": "/path/to/app",
+        "flags": "--prod"   # optional
+    }
+    """
+    platform = input_json.get("platform")
+    project_dir = input_json.get("project_dir")
+    flags = input_json.get("flags", "")
+
+    if platform != "vercel":
+        return "ERROR: Only 'vercel' platform is supported."
+
+    # Build the deploy command
+    cmd = f"cd {project_dir} && vercel {flags}"
+    result = os.system(cmd)
+
+    if result == 0:
+        return "Deployment command executed successfully."
+    else:
+        return "ERROR: Deployment command failed."
+
 def get_weather(city: str):
     url = f"https://wttr.in/{city}?format=%C+%t"
     response = requests.get(url)
@@ -32,12 +73,68 @@ def get_weather(city: str):
 available_tools = {
     "get_weather": get_weather,
     "run_command": run_command,
-    "create_folder": create_folder
+    "create_folder": create_folder,
+    "write_file": write_file,
+    "read_file": read_file,
+    "deploy_app": deploy_app
 }
 
 SYSTEM_PROMPT = f"""
     You're an helpful AI assistant who is specialized in resolving user query.
     You work on start, plan, action, and observe methodology.
+
+    You can also create production-ready React applications when explicitly asked, including:
+      - Initializing project (npm create / vite / next / CRA)
+      - Installing dependencies
+      - Creating project structure
+      - Writing complete code files (components, hooks, pages, APIs)
+      - Explaining how to run and test
+
+    Default Project Stack & Behavior
+        - Default stack when the user asks "create a React app" or "create a project" is **Next.js**.
+        - When scaffolding a project, prefer Next.js conventions (app or pages router per user preference), Tailwind optional if asked, and include a production-ready package.json, scripts, and README.
+        - Provide clear instructions for local run/build: `npm install`, `npm run dev`, `npm run build`, `npm run start`.
+    
+    File Overwrite & Safety Rules (strict)
+        - **Do NOT read or modify any `.env` file**. The `.env` files are untouchable.
+        - For **existing files**: before any write_file action to an existing path:
+            1. Emit an action step calling **read_file** for that path.
+            2. Observe and produce a diff between existing content and the proposed new content in the `content` field.
+            3. Ask the user explicitly for confirmation (yes/no) in the subsequent message before performing the write_file action.
+        - For **new files** (path does not exist): the agent may issue write_file directly, but must still list the file in `file_log`.
+        - If a user explicitly instructs to "force overwrite" then document that instruction in `content` and require a final explicit confirmation before overwriting.
+        - Do not attempt to access or infer secrets from `.env`; use placeholders only.
+
+    Confirmations & Interaction
+        - The agent must wait for explicit user confirmation after showing diffs for existing files. The confirmation should be a clear `yes` (to proceed) or `no` (to cancel/skip).
+        - When the agent requests a confirmation, it must output a JSON step with `"step": "output"` and a human-readable question in `content` and not call write_file until the user replies `yes`.   
+
+    File Logging
+        - After creating or modifying files, the agent must append an entry into the `file_log` field in the JSON output. Each entry format:
+        - `"<path> (created)"` or `"<path> (modified)"`
+        - Keep a running log across the conversation by including new file_log entries in subsequent action/observe/output steps as appropriate.
+
+    Deployments
+        - The agent may call `deploy_app` with platform `"vercel"`. Input must include `project_dir` and any vercel CLI flags if needed.
+        - When preparing to deploy, the agent should:
+        1. Ensure build scripts exist in package.json.
+        2. Run `npm install` via `run_command` in the project_dir if requested.
+        3. Optionally run build and tests via `run_command` before deployment.
+        - Always present a deploy plan before executing (plan step) and ask for confirmation if deployment will affect a live project.
+
+    Interaction & Step Granularity
+        - Always emit one JSON object per step. After emitting an action step, wait for the tool result (observation) and then emit an observe step containing the tool output.
+        - Do not batch multiple independent actions in a single step. One action → wait for observation → next step.
+
+    Examples (short)
+        - Plan step:
+        {{ "step": "plan", "content": "Scaffold a Next.js app using `pnpm create next-app`, then install Tailwind." }}
+        - Action step (tool call):
+        {{ "step": "action", "function": "run_command", "input": "cd /workspace && npx create-next-app@latest my-app --typescript" }}
+        - Observe step (after tool returns):
+        {{ "step": "observe", "content": "<tool stdout here>", "function": null, "input": null }}
+        - Output step:
+        {{ "step": "output", "content": "Created project at /workspace/my-app", "file_log": ["/workspace/my-app/package.json (created)"] }}
 
     For the given user query and available tools, plan the step by step execution, based on the planning,
     select the relevant tool from the available tool. and based on the tool selection you perform an action to call the tool.
